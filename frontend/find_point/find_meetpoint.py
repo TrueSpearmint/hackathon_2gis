@@ -1,35 +1,106 @@
+"""Utilities for calculating an optimal meet point for a group of people."""
+
+from __future__ import annotations
+
 import os
 from collections import defaultdict
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-import geopandas as gpd
 import numpy as np
-from routingpy import ORS
-from shapely.geometry import Point, Polygon
+
+try:  # Optional heavy dependencies.
+    import geopandas as gpd
+except ImportError:  # pragma: no cover - environment without geopandas.
+    gpd = None  # type: ignore
+
+try:  # routingpy provides the OpenRouteService client used by the script.
+    from routingpy import ORS
+except ImportError:  # pragma: no cover - environment without routingpy.
+    ORS = None  # type: ignore
+
+try:
+    from shapely.geometry import Point, Polygon
+except ImportError:  # pragma: no cover - environment without shapely.
+    Point = None  # type: ignore
+    Polygon = None  # type: ignore
 
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 SERVICE_MATRIX_LIMIT = 3500
-client = ORS(
-    api_key=ORS_API_KEY,
-    timeout=10,
-    retry_timeout=60,
-    retry_over_query_limit=True,
-    skip_api_error=True,
-)
+
+__all__ = [
+    "MeetpointDependencyError",
+    "MeetpointComputationError",
+    "create_base_search_area",
+    "create_local_search_area",
+    "generate_candidates",
+    "build_matrix",
+    "build_main_vector",
+    "find_optimal_meetpoint",
+    "compute_best_meetpoint",
+]
 
 
-def create_base_search_area(points):
-    """Создаёт расширенный прямоугольный полигон вокруг заданных точек."""
-    gdf = gpd.GeoDataFrame(
-        geometry=[Polygon([(p.x, p.y) for p in points])], crs="EPSG:4326"
+class MeetpointDependencyError(RuntimeError):
+    """Raised when optional dependencies for meetpoint calculation are missing."""
+
+
+class MeetpointComputationError(RuntimeError):
+    """Raised when meetpoint calculation fails for another reason."""
+
+
+def _build_client(api_key: Optional[str] = None):
+    """Return a configured ORS client or raise if dependencies are missing."""
+
+    if ORS is None:
+        raise MeetpointDependencyError("routingpy is not installed")
+
+    key = api_key or ORS_API_KEY
+    if not key:
+        raise MeetpointDependencyError("ORS_API_KEY environment variable is not configured")
+
+    return ORS(
+        api_key=key,
+        timeout=10,
+        retry_timeout=60,
+        retry_over_query_limit=True,
+        skip_api_error=True,
     )
+
+
+try:
+    client = _build_client()
+except MeetpointDependencyError:  # pragma: no cover - best effort fallback at import time.
+    client = None
+
+
+def _ensure_spatial_dependencies() -> None:
+    if gpd is None or Point is None or Polygon is None:
+        raise MeetpointDependencyError("geopandas and shapely are required for meetpoint calculation")
+
+
+def create_base_search_area(points: Sequence[Point]):
+    """Создаёт расширенный прямоугольный полигон вокруг заданных точек."""
+
+    _ensure_spatial_dependencies()
+    if not points:
+        raise ValueError("points collection cannot be empty")
+
+    hull = gpd.GeoSeries(list(points), crs="EPSG:4326").unary_union
+    if hull.geom_type == "Point":
+        hull = hull.buffer(0.01)
+    elif hull.geom_type == "LineString":
+        hull = hull.buffer(0.01)
+
+    gdf = gpd.GeoDataFrame(geometry=[hull], crs="EPSG:4326")
     crs_utm = gdf.estimate_utm_crs()
     gdf = gdf.to_crs(crs_utm)
     gdf = gdf.buffer(1000)
     return gpd.GeoDataFrame(geometry=gdf.envelope, crs=crs_utm)
 
 
-def create_local_search_area(point, x_step, y_step):
+def create_local_search_area(point: Point, x_step: float, y_step: float):
     """Создаёт прямоугольный полигон вокруг заданной точки."""
+    _ensure_spatial_dependencies()
     gdf = gpd.GeoDataFrame(geometry=[Point(point)], crs="EPSG:4326")
     crs_utm = gdf.estimate_utm_crs()
     gdf = gdf.to_crs(crs_utm)
@@ -38,13 +109,17 @@ def create_local_search_area(point, x_step, y_step):
     return gpd.GeoDataFrame(geometry=gdf_buffer.envelope, crs=crs_utm)
 
 
-def generate_candidates(search_area, people_points):
+def generate_candidates(search_area, people_points: Sequence[Point]):
     """Генерация сетки точек-кандидатов в пределах полигона
     с учётом ограничений на максимальное количество элементов
     в возвращаемой матрице."""
+    _ensure_spatial_dependencies()
     minx, miny, maxx, maxy = search_area.iloc[0].geometry.bounds
     width = maxx - minx
     height = maxy - miny
+
+    if not people_points:
+        raise ValueError("people_points cannot be empty")
 
     max_points = SERVICE_MATRIX_LIMIT / len(people_points)
     approx_step = np.sqrt(1 / max_points)
@@ -68,9 +143,12 @@ def generate_candidates(search_area, people_points):
     return list(gdf_candidates.geometry.values), (x_step, y_step)
 
 
-def build_matrix(client, sources, targets, profiles):
+def build_matrix(client, sources: Sequence[Point], targets: Sequence[Point], profiles: Sequence[str]):
     """Группированный вызов ORS Matrix API по профилямпередвижения."""
     # Группируем индексы людей по профилям
+    if client is None:
+        raise MeetpointDependencyError("ORS client is not configured")
+
     profile_groups = defaultdict(list)
     for i, p in enumerate(profiles):
         profile_groups[p].append(i)
@@ -103,7 +181,7 @@ def build_matrix(client, sources, targets, profiles):
     return durations
 
 
-def build_main_vector(client, candidates, dest, profile):
+def build_main_vector(client, candidates: Sequence[Point], dest: Point, profile: str):
     """
     Матрица времени от кандидатов до пункта назначения.
     Отличие от основного вызова лишь в формате ответа:
@@ -111,6 +189,9 @@ def build_main_vector(client, candidates, dest, profile):
     Можно было бы интегрировать в build_matrix для минимизации запросов, но так
     функцию проще добавлять отдельно в зависимости от типа встречи: встреча или поездка.
     """
+    if client is None:
+        raise MeetpointDependencyError("ORS client is not configured")
+
     start_points = [[p.x, p.y] for p in candidates]
     target_points = [[dest.x, dest.y]]
     result = client.matrix(
@@ -124,7 +205,10 @@ def build_main_vector(client, candidates, dest, profile):
 
 
 def find_optimal_meetpoint(
-    matrix_people_to_meetpoint, vector_meetpoint_to_dest, candidates, type_of_meetpoint
+    matrix_people_to_meetpoint,
+    vector_meetpoint_to_dest,
+    candidates: Sequence[Point],
+    type_of_meetpoint: str,
 ):
     """Находит оптимальную точку встречи в зависимости от критерия и наличия конечной точки."""
     people_count = matrix_people_to_meetpoint.shape[0]
@@ -156,6 +240,79 @@ def find_optimal_meetpoint(
         return candidates[j_max]
     else:
         raise ValueError("type_of_meetpoint должен быть 'minisum' или 'minimax'")
+
+
+def compute_best_meetpoint(
+    people_coordinates: Sequence[Dict[str, float]],
+    people_profiles: Sequence[str],
+    destination: Optional[Dict[str, float]] = None,
+    destination_profile: Optional[str] = None,
+    *,
+    type_of_meetpoint: str = "minisum",
+    api_key: Optional[str] = None,
+    client_instance=None,
+) -> Tuple[Dict[str, float], Dict[str, object]]:
+    """High-level helper that orchestrates the meetpoint search pipeline.
+
+    Returns a tuple ``(coordinates, meta)`` where ``coordinates`` is a mapping with
+    ``lat`` and ``lng`` keys and ``meta`` contains diagnostic information.
+    """
+
+    if not people_coordinates:
+        raise ValueError("people_coordinates must contain at least one entry")
+    if len(people_coordinates) != len(people_profiles):
+        raise ValueError("people_coordinates and people_profiles length mismatch")
+
+    normalized_type = (type_of_meetpoint or "minisum").lower()
+    if normalized_type not in {"minisum", "minimax"}:
+        raise ValueError("type_of_meetpoint должен быть 'minisum' или 'minimax'")
+
+    _ensure_spatial_dependencies()
+
+    try:
+        points = [Point(float(item["lng"]), float(item["lat"])) for item in people_coordinates]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid people_coordinates entry") from exc
+
+    dest_point: Optional[Point] = None
+    if destination is not None:
+        try:
+            dest_point = Point(float(destination["lng"]), float(destination["lat"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid destination coordinates") from exc
+
+    client_to_use = client_instance
+    if client_to_use is None:
+        if client is not None:
+            client_to_use = client
+        else:
+            client_to_use = _build_client(api_key)
+
+    search_area = create_base_search_area(points)
+    candidates, (x_step, y_step) = generate_candidates(search_area, points)
+    matrix_people = build_matrix(client_to_use, points, candidates, people_profiles)
+
+    vector_dest = None
+    if dest_point is not None:
+        dest_profile = destination_profile or "driving-car"
+        vector_dest = build_main_vector(client_to_use, candidates, dest_point, dest_profile)
+
+    best_point = find_optimal_meetpoint(
+        matrix_people,
+        vector_dest,
+        candidates,
+        normalized_type,
+    )
+
+    coordinates = {"lat": float(best_point.y), "lng": float(best_point.x)}
+    meta = {
+        "candidates": len(candidates),
+        "step": {"x": float(x_step), "y": float(y_step)},
+        "type_of_meetpoint": normalized_type,
+        "destination_included": dest_point is not None,
+    }
+
+    return coordinates, meta
 
 
 if __name__ == "__main__":
