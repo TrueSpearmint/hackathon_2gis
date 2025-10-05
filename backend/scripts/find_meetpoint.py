@@ -6,6 +6,9 @@ import numpy as np
 from routingpy import ORS
 from shapely.geometry import Point, Polygon
 
+from find_transport_stop_near_meetpoint import find_transport_stop_near_meetpoint
+
+GIS2_API_KEY = os.getenv("GIS2_API_KEY")
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 SERVICE_MATRIX_LIMIT = 3500
 client = ORS(
@@ -220,4 +223,10 @@ if __name__ == "__main__":
         vector_meetpoint_to_dest,
         candidates,
         type_of_meetpoint,
+    )
+
+    # Блок 7: Определение ближайшей точки встречи на остановках общественного транспорта
+    best_meetpoint_coords = (best_meetpoint.x, best_meetpoint.y)
+    best_meetpoint = find_transport_stop_near_meetpoint(
+        best_meetpoint_coords, GIS2_API_KEY, radius=1500
     )
