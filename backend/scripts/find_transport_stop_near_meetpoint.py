@@ -127,4 +127,4 @@ def find_transport_stop_near_meetpoint(center_point, api_key, radius=1500):
         point_data = bus_stops[0].get("point", {})
         return (point_data["lon"], point_data["lat"])
 
-    return (center_point[0] + 0.001, center_point[1] + 0.001)
+    return center_point
