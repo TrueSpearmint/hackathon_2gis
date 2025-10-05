@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request, current_app
 from pydantic import ValidationError
 
 from .gis_client import reverse_geocode, route_public_transport, route_transport, search_places
+from .meetpoint_service import calculate_meetpoint
 from .models import OptimizeRequest, Script
 from .worker import script_store, task_manager
 
@@ -283,6 +284,34 @@ def point_info():
 
     info = reverse_geocode(lat, lng)
     return jsonify(info)
+
+
+@api_bp.post("/meetpoint")
+def meetpoint():
+    payload = request.get_json(silent=True) or {}
+    participants = payload.get("participants")
+    if not isinstance(participants, list) or not participants:
+        return jsonify({"error": "participants must be a non-empty list"}), HTTPStatus.BAD_REQUEST
+
+    type_of_meetpoint = (payload.get("type_of_meetpoint") or "minisum").strip().lower()
+    destination_payload = payload.get("destination") if payload.get("has_destination", True) else None
+    if destination_payload is not None and not isinstance(destination_payload, dict):
+        destination_payload = None
+
+    try:
+        result = calculate_meetpoint(
+            participants,
+            destination=destination_payload,
+            type_of_meetpoint=type_of_meetpoint,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
+
+    response: Dict[str, object] = {
+        "meetpoint": result.point,
+        "meta": result.meta,
+    }
+    return jsonify(response)
 
 
 @api_bp.post("/quick_route")

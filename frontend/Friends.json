@@ -2,23 +2,23 @@
   {
     "friend_id": 1,
     "name": "Андрей",
-    "x_coord": 55.807182,
-    "y_coord": 37.530655,
-    "mode": "car"
+    "x_coord": 55.668757,
+    "y_coord": 37.802357,
+    "mode": "public_transport"
   },
   {
     "friend_id": 2,
     "name": "Илья С",
-    "x_coord": 55.766485,
-    "y_coord": 37.740649,
+    "x_coord": 55.644621,
+    "y_coord": 37.527237,
     "mode": "public_transport"
   },
   {
     "friend_id": 3,
     "name": "Илья У",
-    "x_coord": 55.723631,
-    "y_coord": 37.562041,
-    "mode": "walking"
+    "x_coord": 55.790507,
+    "y_coord": 37.531429,
+    "mode": "public_transport"
   },
   {
     "friend_id": 4,

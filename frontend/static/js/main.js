@@ -75,6 +75,16 @@
     var targetZPoint = null;
     var activeFriendId = null;
     var friendStates = {};
+    var meetpointState = {
+        key: null,
+        point: null,
+        pending: null,
+        meta: null,
+        error: null,
+        lastLoggedSignature: null
+    };
+    var meetpointRecalcTimer = null;
+    var DEFAULT_MEETPOINT_TYPE = 'minisum';
     function collectParticipantPoints() {
         var points = [];
         if (startPoint && typeof startPoint.lat === 'number' && typeof startPoint.lng === 'number') {
@@ -152,9 +162,216 @@
         return current;
     }
 
+    function normalizeMeetpointType(value) {
+        var normalized = (value || '').toLowerCase();
+        if (normalized !== 'minimax' && normalized !== 'minisum') {
+            return DEFAULT_MEETPOINT_TYPE;
+        }
+        return normalized;
+    }
+
+    function getConfiguredMeetpointType() {
+        if (config && typeof config.meetpointType === 'string' && config.meetpointType.trim()) {
+            return normalizeMeetpointType(config.meetpointType.trim());
+        }
+        return DEFAULT_MEETPOINT_TYPE;
+    }
+
+    function collectMeetpointParticipants() {
+        var participants = [];
+        if (startPoint && typeof startPoint.lat === 'number' && typeof startPoint.lng === 'number') {
+            var userLat = Number(startPoint.lat);
+            var userLng = Number(startPoint.lng);
+            if (!Number.isNaN(userLat) && !Number.isNaN(userLng)) {
+                participants.push({
+                    id: 'user',
+                    lat: userLat,
+                    lng: userLng,
+                    transport: transportSelect ? transportSelect.value : 'driving'
+                });
+            }
+        }
+        for (var i = 0; i < friendsData.length; i += 1) {
+            var friend = friendsData[i];
+            if (!friend || friend.friend_id == null) {
+                continue;
+            }
+            var state = ensureFriendState(friend, i);
+            if (state && state.included !== false) {
+                var lat = Number(friend.x_coord);
+                var lng = Number(friend.y_coord);
+                if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                    participants.push({
+                        id: 'friend:' + String(friend.friend_id),
+                        lat: lat,
+                        lng: lng,
+                        transport: getFriendTransportMode(friend, i)
+                    });
+                }
+            }
+        }
+        return participants;
+    }
+
+    function buildMeetpointPayload() {
+        var participants = collectMeetpointParticipants();
+        if (!participants.length) {
+            return null;
+        }
+        var payload = {
+            participants: participants,
+            type_of_meetpoint: getConfiguredMeetpointType(),
+            has_destination: false
+        };
+        if (selectedDestination && selectedDestination.point && typeof selectedDestination.point.lat === 'number' && typeof selectedDestination.point.lng === 'number') {
+            var destLat = Number(selectedDestination.point.lat);
+            var destLng = Number(selectedDestination.point.lng);
+            if (!Number.isNaN(destLat) && !Number.isNaN(destLng)) {
+                payload.destination = {
+                    lat: destLat,
+                    lng: destLng,
+                    transport: transportSelect ? transportSelect.value : 'driving'
+                };
+                payload.has_destination = true;
+            }
+        }
+        return payload;
+    }
+
+    function getMeetpointCacheKey(payload) {
+        if (!payload) {
+            return null;
+        }
+        return JSON.stringify(payload);
+    }
+
+    function logMeetpointMeta(meta) {
+        meta = meta || {};
+        var source = meta.source || 'unknown';
+        var fallback = Boolean(meta.fallback_used);
+        var signature = source + '|' + (fallback ? '1' : '0');
+        if (meetpointState.lastLoggedSignature !== signature) {
+            meetpointState.lastLoggedSignature = signature;
+            var message = 'Точка встречи рассчитана: ' + source;
+            if (fallback && meta.fallback_reason) {
+                message += ' (' + meta.fallback_reason + ')';
+            } else if (fallback) {
+                message += ' (fallback)';
+            }
+            log(message);
+        }
+    }
+
+    function requestMeetpointUpdate(force) {
+        var payload = buildMeetpointPayload();
+        if (!payload) {
+            meetpointState.key = null;
+            meetpointState.point = null;
+            meetpointState.meta = null;
+            meetpointState.error = null;
+            meetpointState.lastLoggedSignature = null;
+            meetpointState.pending = null;
+            targetZPoint = null;
+            return Promise.resolve(null);
+        }
+
+        var cacheKey = getMeetpointCacheKey(payload);
+        if (!force) {
+            if (meetpointState.pending && meetpointState.key === cacheKey) {
+                return meetpointState.pending;
+            }
+            if (meetpointState.point && meetpointState.key === cacheKey) {
+                return Promise.resolve(meetpointState.point);
+            }
+        }
+
+        meetpointState.key = cacheKey;
+        meetpointState.error = null;
+        var requestKey = cacheKey;
+
+        var request = fetch('/api/meetpoint', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).then(function (response) {
+            if (!response.ok) {
+                return response.json().catch(function () { return {}; }).then(function (data) {
+                    var message = data && data.error ? String(data.error) : ('HTTP ' + response.status);
+                    throw new Error(message);
+                });
+            }
+            return response.json();
+        }).then(function (data) {
+            if (meetpointState.key !== requestKey) {
+                return meetpointState.point || null;
+            }
+            var meetpoint = data && data.meetpoint;
+            if (!meetpoint || typeof meetpoint.lat === 'undefined' || typeof meetpoint.lng === 'undefined') {
+                throw new Error('Неверный ответ meetpoint');
+            }
+            var lat = Number(meetpoint.lat);
+            var lng = Number(meetpoint.lng);
+            if (Number.isNaN(lat) || Number.isNaN(lng)) {
+                throw new Error('Некорректные координаты meetpoint');
+            }
+            var point = {lat: lat, lng: lng};
+            meetpointState.point = point;
+            meetpointState.meta = data.meta || {};
+            meetpointState.error = null;
+            targetZPoint = point;
+            logMeetpointMeta(meetpointState.meta);
+            return point;
+        }).catch(function (error) {
+            meetpointState.error = error;
+            if (meetpointState.key !== requestKey) {
+                throw error;
+            }
+            var points = collectParticipantPoints();
+            var fallback = computeGeometricMedian(points);
+            if (fallback) {
+                meetpointState.point = fallback;
+                meetpointState.meta = {
+                    source: 'geometric_median',
+                    fallback_used: true,
+                    fallback_reason: error && error.message ? error.message : String(error)
+                };
+                meetpointState.lastLoggedSignature = null;
+                targetZPoint = fallback;
+                log('Не удалось получить точку встречи с сервера: ' + (error && error.message ? error.message : String(error)));
+                log('Используем локальную геометрическую медиану участников.');
+                logMeetpointMeta(meetpointState.meta);
+                return fallback;
+            }
+            meetpointState.point = null;
+            meetpointState.meta = null;
+            targetZPoint = null;
+            throw error;
+        }).finally(function () {
+            if (meetpointState.key === requestKey) {
+                meetpointState.pending = null;
+            }
+        });
+
+        meetpointState.pending = request;
+        return request;
+    }
+
+    function scheduleMeetpointRecalculation(force) {
+        if (meetpointRecalcTimer) {
+            clearTimeout(meetpointRecalcTimer);
+        }
+        meetpointRecalcTimer = setTimeout(function () {
+            meetpointRecalcTimer = null;
+            requestMeetpointUpdate(Boolean(force));
+        }, 250);
+    }
+
     function calculateDynamicTargetZ() {
+        if (meetpointState.point && typeof meetpointState.point.lat === 'number' && typeof meetpointState.point.lng === 'number') {
+            return {lat: meetpointState.point.lat, lng: meetpointState.point.lng};
+        }
         var points = collectParticipantPoints();
-        if (!points || points.length < 2) {
+        if (!points || !points.length) {
             return null;
         }
         var median = computeGeometricMedian(points);
@@ -961,6 +1178,7 @@ function persistFriendTransport(friend, state, previousMode) {
                     }
                 }
                 updatePickupOptions();
+                scheduleMeetpointRecalculation();
             });
 
             var colorSwatch = document.createElement('span');
@@ -993,6 +1211,7 @@ function persistFriendTransport(friend, state, previousMode) {
                 updatePickupOptions();
                 renderFriendsList();
                 persistFriendTransport(friend, state, previousMode);
+                scheduleMeetpointRecalculation();
             });
 
             left.appendChild(checkbox);
@@ -1016,7 +1235,7 @@ function persistFriendTransport(friend, state, previousMode) {
 
             item.appendChild(left);
             item.appendChild(button);
-            friendsList.appendChild(item);
+        friendsList.appendChild(item);
         });
         updatePickupOptions();
         if (pickupFriendSelect) {
@@ -1025,6 +1244,7 @@ function persistFriendTransport(friend, state, previousMode) {
         if (pickupEnable && pickupFriendSelect && !pickupFriendSelect.value) {
             pickupEnable.checked = false;
         }
+        scheduleMeetpointRecalculation();
     }
 
     function loadFriends(forceReload) {
@@ -1082,6 +1302,7 @@ function persistFriendTransport(friend, state, previousMode) {
                 renderFriendsList();
                 updatePickupControlsVisibility();
                 log('Загружено друзей: ' + friendsData.length);
+                scheduleMeetpointRecalculation();
             })
             .catch(function (error) {
                 friendsLoaded = false;
@@ -1093,19 +1314,32 @@ function persistFriendTransport(friend, state, previousMode) {
     }
 
     function resolveTargetZ() {
-        var dynamicPoint = calculateDynamicTargetZ();
         var chosenPoint = null;
         var source = 'config';
-        if (dynamicPoint) {
+        var dynamicPoint = null;
+        var overridePoint = meetpointState && meetpointState.point;
+        var overrideMeta = (meetpointState && meetpointState.meta) || null;
+        if (overridePoint && typeof overridePoint.lat === 'number' && typeof overridePoint.lng === 'number') {
+            var overrideLat = Number(overridePoint.lat);
+            var overrideLng = Number(overridePoint.lng);
+            if (!Number.isNaN(overrideLat) && !Number.isNaN(overrideLng)) {
+                chosenPoint = {lat: overrideLat, lng: overrideLng};
+                source = (overrideMeta && overrideMeta.source) || 'meetpoint';
+            }
+        }
+        if (!chosenPoint) {
+            dynamicPoint = calculateDynamicTargetZ();
+        }
+        if (!chosenPoint && dynamicPoint) {
             chosenPoint = dynamicPoint;
             source = 'dynamic';
-        } else if (config && config.targetZ && typeof config.targetZ.lat === 'number' && typeof config.targetZ.lng === 'number') {
+        } else if (!chosenPoint && config && config.targetZ && typeof config.targetZ.lat === 'number' && typeof config.targetZ.lng === 'number') {
             var lat = Number(config.targetZ.lat);
             var lng = Number(config.targetZ.lng);
             if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
                 chosenPoint = {lat: lat, lng: lng};
             }
-        } else if (targetZPoint) {
+        } else if (!chosenPoint && targetZPoint) {
             chosenPoint = targetZPoint;
             source = 'cached';
         }
@@ -1122,6 +1356,21 @@ function persistFriendTransport(friend, state, previousMode) {
         if (scheduleData) {
             scheduleData.targetSource = source;
             scheduleData.dynamicPoint = dynamicPoint || null;
+            var methodLabel = null;
+            if (overrideMeta && chosenPoint) {
+                if (overrideMeta.method) {
+                    methodLabel = overrideMeta.method;
+                } else if (overrideMeta.type_of_meetpoint) {
+                    methodLabel = overrideMeta.type_of_meetpoint;
+                } else if (overrideMeta.source) {
+                    methodLabel = overrideMeta.source;
+                }
+            }
+            if (methodLabel) {
+                scheduleData.meetpointMethod = methodLabel;
+            } else {
+                delete scheduleData.meetpointMethod;
+            }
         }
         return targetZPoint;
     }
@@ -1813,6 +2062,7 @@ function persistFriendTransport(friend, state, previousMode) {
             map.setView([place.point.lat, place.point.lng], 14);
             log('Точка Б установлена: ' + destinationLabel);
         }
+        scheduleMeetpointRecalculation();
     }
 
     function setStartPoint(latlng, label) {
@@ -1829,6 +2079,7 @@ function persistFriendTransport(friend, state, previousMode) {
             address: null,
             point: {lat: latlng.lat, lng: latlng.lng}
         });
+        scheduleMeetpointRecalculation();
     }
 
     function clearStartPoint() {
@@ -1847,6 +2098,7 @@ function persistFriendTransport(friend, state, previousMode) {
         } else {
             log('Точка А ещё не задана.');
         }
+        scheduleMeetpointRecalculation();
     }
 
     function showPointInfo(point) {
@@ -1991,7 +2243,7 @@ function persistFriendTransport(friend, state, previousMode) {
         });
     }
 
-    function openRoute() {
+    async function openRoute() {
         var hasDestination = Boolean(selectedDestination && selectedDestination.point);
         if (!hasDestination) {
             log('Точка Б не задана — строим маршруты только до точки встречи');
@@ -2002,6 +2254,11 @@ function persistFriendTransport(friend, state, previousMode) {
         }
         var transport = transportSelect ? transportSelect.value : 'driving';
         var userOptions = collectUserRouteOptions(transport);
+        try {
+            await requestMeetpointUpdate(true);
+        } catch (error) {
+            log('Не удалось обновить точку встречи: ' + (error && error.message ? error.message : String(error)));
+        }
         var target = resolveTargetZ();
         if (!target) {
             log('Точка встречи не настроена. Заполните TARGET_Z_LAT и TARGET_Z_LNG.');
@@ -2416,7 +2673,11 @@ function persistFriendTransport(friend, state, previousMode) {
         });
     }
     geolocationButton.addEventListener('click', useGeolocation);
-    openRouteButton.addEventListener('click', openRoute);
+    openRouteButton.addEventListener('click', function () {
+        openRoute().catch(function (error) {
+            log('Не удалось запустить расчёт маршрутов: ' + (error && error.message ? error.message : String(error)));
+        });
+    });
     setPointStartButton.addEventListener('click', applyPointAsStart);
     setPointDestinationButton.addEventListener('click', applyPointAsDestination);
     if (pickupEnable) {
@@ -2432,6 +2693,13 @@ function persistFriendTransport(friend, state, previousMode) {
             } else if (pickupFriendSelect && !pickupFriendSelect.value) {
                 log('Выберите друга для подбора из списка.');
             }
+        });
+    }
+
+    if (transportSelect) {
+        transportSelect.addEventListener('change', function () {
+            updateTransportUi();
+            scheduleMeetpointRecalculation();
         });
     }
     if (pickupFriendSelect) {
@@ -2485,6 +2753,7 @@ function persistFriendTransport(friend, state, previousMode) {
 
     waitForDG();
     updateTransportUi();
+    scheduleMeetpointRecalculation();
 }());
 
 
