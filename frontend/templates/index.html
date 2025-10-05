@@ -1,0 +1,177 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>2GIS Multi-User Routing Demo</title>
+    <link rel="stylesheet" href="https://unpkg.com/normalize.css@8.0.1/normalize.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% if gis_api_key %}
+    <script src="https://maps.api.2gis.ru/2.0/loader.js?pkg=full&key={{ gis_api_key }}"></script>
+    {% else %}
+    <script src="https://maps.api.2gis.ru/2.0/loader.js?pkg=full"></script>
+    {% endif %}
+</head>
+<body>
+    <main class="layout">
+        <section class="panel">
+            <h1>Маршруты к общей точке</h1>
+
+            <section class="search-block">
+                <h2 class="panel-title">Поиск места</h2>
+                <label class="sr-only" for="search-query">Введите название адреса</label>
+                <div class="search-controls">
+                    <input id="search-query" type="text" placeholder="Например, Кремль" autocomplete="off">
+                    <button id="search-place" type="button">Поиск</button>
+                </div>
+                <div class="transport-controls">
+                    <label for="transport-select">Транспорт</label>
+                    <select id="transport-select">
+                        <option value="driving">Авто (driving)</option>
+                        <option value="taxi">Такси (taxi)</option>
+                        <option value="bicycle">Велосипед (bicycle)</option>
+                        <option value="scooter">Самокат (scooter)</option>
+                        <option value="motorcycle">Мотоцикл (motorcycle)</option>
+                        <option value="truck">Грузовой (truck)</option>
+                        <option value="emergency">Экстренные службы (emergency)</option>
+                        <option value="walking">Пешком (walking)</option>
+                        <option value="public_transport">Общественный транспорт</option>
+                    </select>
+                </div>
+                <div class="pt-options hidden" id="pt-options">
+                    <span>Виды транспорта:</span>
+                    <label><input type="checkbox" value="bus" checked> Автобус</label>
+                    <label><input type="checkbox" value="trolleybus" checked> Троллейбус</label>
+                    <label><input type="checkbox" value="tram" checked> Трамвай</label>
+                    <label><input type="checkbox" value="metro" checked> Метро</label>
+                    <label><input type="checkbox" value="shuttle_bus" checked> Маршрутка</label>
+                    <label><input type="checkbox" value="rail"> Пригородный поезд</label>
+                </div>
+                <div class="options-block" id="options-block">
+                    <div class="filters-controls hidden" id="filters-controls">
+                        <span>Исключить участки:</span>
+                        <label><input type="checkbox" value="dirt_road"> Грунтовые</label>
+                        <label><input type="checkbox" value="toll_road"> Платные</label>
+                        <label><input type="checkbox" value="ferry"> Переправы</label>
+                        <label><input type="checkbox" value="ban_car_road"> Дороги для авто</label>
+                        <label><input type="checkbox" value="ban_stairway"> Лестницы без пандуса</label>
+                        <label><input type="checkbox" value="highway"> Магистрали</label>
+                    </div>
+                    <div class="flex-row" id="traffic-row">
+                        <label for="traffic-mode">Режим пробок</label>
+                        <select id="traffic-mode">
+                            <option value="jam">Текущие</option>
+                            <option value="statistics">Статистика</option>
+                            <option value="none">Не учитывать</option>
+                        </select>
+                    </div>
+                    <div class="flex-row hidden">
+                        <label for="output-select">Формат выдачи</label>
+                        <select id="output-select">
+                            <option value="detailed" selected>Detailed</option>
+                        </select>
+                    </div>
+                    <div class="toggle-row hidden">
+                        <label class="hidden"><input type="checkbox" id="need-altitudes"> Высотный профиль</label>
+                        <label class="hidden"><input type="checkbox" id="allow-locked-roads"> Разрешить перекрытия</label>
+                    </div>
+                </div>
+                <ul id="search-results" class="search-results"></ul>
+                <div class="pickup-controls hidden" id="pickup-controls">
+                    <label><input type="checkbox" id="pickup-enable"> Подобрать друга по пути</label>
+                    <select id="pickup-friend" class="pickup-controls__select">
+                        <option value="">— выберите друга —</option>
+                    </select>
+                </div>
+                <div class="nav-controls">
+                    <button id="friends-toggle" type="button">Друзья</button>
+                    <button id="use-geolocation" type="button">Моё местоположение</button>
+                    <button id="open-route" type="button">Просчитать маршрут</button>
+                </div>
+                <div class="schedule-controls">
+                    <label for="arrival-time">Прибыть в точку Б к:</label>
+                    <div class="schedule-controls__inputs">
+                        <input type="datetime-local" id="arrival-time">
+                        <button id="calculate-schedule" type="button">Рассчитать старт</button>
+                    </div>
+                </div>
+                <div id="schedule-results" class="schedule-results hidden"></div>
+                <div id="friends-panel" class="friends-panel hidden">
+                    <h3>Друзья</h3>
+                    <ul id="friends-list"></ul>
+                </div>
+                <p class="hint">Выберите точку Б через поиск или клик по карте. Точку А задайте кликом по карте либо выберите через геолокацию.</p>
+                <div id="point-info" class="point-info hidden">
+                    <h3>Выбранная точка</h3>
+                    <p id="point-info-name"></p>
+                    <p id="point-info-address" class="point-address"></p>
+                    <p id="point-info-coords" class="point-coords"></p>
+                    <div class="point-actions">
+                        <button id="set-point-start" type="button">Сделать точкой А</button>
+                        <button id="set-point-destination" type="button">Сделать точкой Б</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="route-info" class="route-info hidden">
+                <h2 class="panel-title">Информация о маршруте</h2>
+                <div id="route-summary" class="route-summary"></div>
+                <details open class="route-graph">
+                    <summary>Граф и шаги</summary>
+                    <table id="route-steps" class="route-steps">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Действие</th>
+                                <th>Дистанция</th>
+                                <th>Время</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </details>
+            </section>
+
+            <section class="script-block hidden">
+                <label for="script-input">JSON скрипт</label>
+                <textarea id="script-input" rows="10" placeholder="Вставьте JSON или используйте пример"></textarea>
+                <div class="actions">
+                    <button id="load-sample" type="button">Загрузить пример</button>
+                    <button id="upload-script" type="button">Upload</button>
+                    <select id="algorithm-select">
+                        <option value="greedy">greedy (эвристика)</option>
+                        <option value="ortools">ortools (заглушка)</option>
+                        <option value="custom">custom (подставьте своё)</option>
+                    </select>
+                    <button id="optimize" type="button">Optimize</button>
+                </div>
+            </section>
+
+            <pre id="status-log"></pre>
+        </section>
+        <section class="map-container">
+            <div id="map" class="map"></div>
+        </section>
+    </main>
+    <script>
+        window.APP_CONFIG = {
+            gisApiKey: "{{ gis_api_key }}",
+            enableRasterLayer: {{ enable_raster | tojson }},
+            targetZ: {{ target_z | tojson }}
+        };
+    </script>
+    <script src="/static/js/main.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                document.querySelectorAll('*').forEach(function (node) {
+                    var text = (node.textContent || '').trim();
+                    if (text === 'Гид' || text === 'Жильё') {
+                        node.style.display = 'none';
+                    }
+                });
+            }, 1500);
+        });
+    </script>
+</body>
+</html>
+

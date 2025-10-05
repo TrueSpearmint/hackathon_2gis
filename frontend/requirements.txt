@@ -1,0 +1,7 @@
+﻿flask
+requests
+python-dotenv
+pydantic
+gunicorn
+networkx
+ortools
