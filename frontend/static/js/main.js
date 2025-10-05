@@ -4,6 +4,8 @@
     var startMarker = null;
     var destinationMarker = null;
     var inspectionMarker = null;
+    var friendMarkers = {};
+    var meetpointMarker = null;
     var selectingStart = false;
 
     function $(id) {
@@ -71,6 +73,7 @@
 
     var friendsLoaded = false;
     var friendsLoading = false;
+    var friendsLoadPromise = null;
     var friendsData = [];
     var targetZPoint = null;
     var activeFriendId = null;
@@ -175,6 +178,139 @@
             return normalizeMeetpointType(config.meetpointType.trim());
         }
         return DEFAULT_MEETPOINT_TYPE;
+    }
+
+    function getFriendInitial(friend) {
+        if (friend && typeof friend.name === 'string' && friend.name.trim()) {
+            return friend.name.trim().charAt(0).toUpperCase();
+        }
+        if (friend && friend.friend_id != null) {
+            var friendId = String(friend.friend_id);
+            if (friendId) {
+                return friendId.charAt(0).toUpperCase();
+            }
+        }
+        return '•';
+    }
+
+    function createFriendIcon(color, label) {
+        var symbol = (label || '').trim();
+        if (symbol.length > 1) {
+            symbol = symbol.charAt(0);
+        }
+        if (!symbol) {
+            symbol = '•';
+        }
+        return DG.divIcon({
+            className: 'friend-marker',
+            iconAnchor: [12, 12],
+            iconSize: [24, 24],
+            html: '<div class="friend-marker__dot" style="background-color:' + color + ';">' + escapeHtml(symbol) + '</div>'
+        });
+    }
+
+    function refreshFriendMarkers() {
+        if (!map) {
+            return;
+        }
+        var activeMarkers = {};
+        friendsData.forEach(function (friend, index) {
+            if (!friend || friend.friend_id == null) {
+                return;
+            }
+            var friendId = String(friend.friend_id);
+            var state = ensureFriendState(friend, index);
+            if (state && state.included === false) {
+                return;
+            }
+            var lat = Number(friend.x_coord);
+            var lng = Number(friend.y_coord);
+            if (Number.isNaN(lat) || Number.isNaN(lng)) {
+                return;
+            }
+            activeMarkers[friendId] = true;
+            var color = (state && state.color) || '#1976d2';
+            var marker = friendMarkers[friendId];
+            var icon = createFriendIcon(color, getFriendInitial(friend));
+            if (!marker) {
+                marker = DG.marker([lat, lng], {
+                    title: friend.name || ('Друг #' + friendId),
+                    draggable: true,
+                    icon: icon
+                });
+                (function (trackedId) {
+                    marker.on('dragend', function (event) {
+                        var entry = getFriendDataById(trackedId);
+                        if (!entry) {
+                            return;
+                        }
+                        var position = event.target.getLatLng();
+                        entry.friend.x_coord = Number(position.lat.toFixed(6));
+                        entry.friend.y_coord = Number(position.lng.toFixed(6));
+                        var entryState = ensureFriendState(entry.friend, entry.index);
+                        if (entryState) {
+                            entryState.routes = {};
+                        }
+                        scheduleMeetpointRecalculation(true);
+                        renderFriendsList();
+                        refreshFriendMarkers();
+                        log('Координаты обновлены для ' + (entry.friend.name || ('друга #' + trackedId)) + ': ' + position.lat.toFixed(6) + ', ' + position.lng.toFixed(6));
+                    });
+                })(friendId);
+                marker.addTo(map);
+                friendMarkers[friendId] = marker;
+            } else {
+                marker.setLatLng([lat, lng]);
+                marker.setIcon(icon);
+                if (!map.hasLayer(marker)) {
+                    marker.addTo(map);
+                }
+            }
+        });
+        Object.keys(friendMarkers).forEach(function (friendId) {
+            if (!Object.prototype.hasOwnProperty.call(activeMarkers, friendId)) {
+                var marker = friendMarkers[friendId];
+                if (marker && map && map.hasLayer(marker)) {
+                    map.removeLayer(marker);
+                }
+                delete friendMarkers[friendId];
+            }
+        });
+    }
+
+    function updateMeetpointMarker(point, meta) {
+        if (!map) {
+            return;
+        }
+        if (meetpointMarker && map.hasLayer(meetpointMarker)) {
+            map.removeLayer(meetpointMarker);
+        }
+        meetpointMarker = null;
+        if (!point || typeof point.lat !== 'number' || typeof point.lng !== 'number') {
+            return;
+        }
+        meetpointMarker = DG.circleMarker([point.lat, point.lng], {
+            radius: 9,
+            color: '#b71c1c',
+            fillColor: '#ff1744',
+            fillOpacity: 0.95,
+            weight: 3,
+            opacity: 1
+        });
+        var popupLines = [
+            '<strong>\u0422\u043e\u0447\u043a\u0430 \u0432\u0441\u0442\u0440\u0435\u0447\u0438 Z</strong>',
+            '\u041a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442\u044b: ' + point.lat.toFixed(6) + ', ' + point.lng.toFixed(6)
+        ];
+        if (meta && meta.source) {
+            popupLines.push('\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a: ' + escapeHtml(String(meta.source)));
+        }
+        if (meta && meta.method) {
+            popupLines.push('\u041c\u0435\u0442\u043e\u0434: ' + escapeHtml(String(meta.method)));
+        } else if (meta && meta.type_of_meetpoint) {
+            popupLines.push('\u041c\u0435\u0442\u043e\0434: ' + escapeHtml(String(meta.type_of_meetpoint)));
+        }
+        meetpointMarker.bindPopup(popupLines.join('<br>'));
+        meetpointMarker.addTo(map);
     }
 
     function collectMeetpointParticipants() {
@@ -1080,7 +1216,7 @@
         if (isHidden) {
             friendsPanel.classList.remove('hidden');
             friendsToggle.classList.add('active');
-            loadFriends();
+            loadFriends().catch(function () {});
         } else {
             friendsPanel.classList.add('hidden');
             friendsToggle.classList.remove('active');
@@ -1245,23 +1381,26 @@ function persistFriendTransport(friend, state, previousMode) {
             pickupEnable.checked = false;
         }
         scheduleMeetpointRecalculation();
+        refreshFriendMarkers();
     }
 
     function loadFriends(forceReload) {
-        if (!friendsList) {
-            return;
-        }
-        if (friendsLoading) {
-            return;
-        }
-        if (friendsLoaded && !forceReload) {
+        var requireReload = Boolean(forceReload);
+        if (friendsLoaded && !requireReload) {
             renderFriendsList();
             updatePickupControlsVisibility();
-            return;
+            return Promise.resolve(friendsData);
         }
+        if (friendsLoading && friendsLoadPromise) {
+            return friendsLoadPromise;
+        }
+
         friendsLoading = true;
-        renderFriendsPlaceholder('Загружаем...');
-        fetch('/api/friends')
+        if (friendsList) {
+            renderFriendsPlaceholder('Загружаем...');
+        }
+
+        var request = fetch('/api/friends')
             .then(function (response) {
                 if (!response.ok) {
                     throw new Error('HTTP ' + response.status);
@@ -1298,20 +1437,28 @@ function persistFriendTransport(friend, state, previousMode) {
                 }
 
                 friendsLoaded = true;
-                friendsLoading = false;
                 renderFriendsList();
                 updatePickupControlsVisibility();
                 log('Загружено друзей: ' + friendsData.length);
                 scheduleMeetpointRecalculation();
+                return friendsData;
             })
             .catch(function (error) {
                 friendsLoaded = false;
-                friendsLoading = false;
                 renderFriendsPlaceholder('Не удалось загрузить друзей');
                 updatePickupControlsVisibility();
-                log('Ошибка загрузки друзей: ' + error.message);
+                log('Ошибка загрузки друзей: ' + (error && error.message ? error.message : String(error)));
+                throw error;
+            })
+            .finally(function () {
+                friendsLoading = false;
+                friendsLoadPromise = null;
             });
+
+        friendsLoadPromise = request;
+        return request;
     }
+
 
     function resolveTargetZ() {
         var chosenPoint = null;
@@ -1372,6 +1519,7 @@ function persistFriendTransport(friend, state, previousMode) {
                 delete scheduleData.meetpointMethod;
             }
         }
+        updateMeetpointMarker(chosenPoint, overrideMeta || (chosenPoint ? {source: source} : null));
         return targetZPoint;
     }
 
@@ -1588,6 +1736,10 @@ function persistFriendTransport(friend, state, previousMode) {
     }
 
     function attachRasterLayer(key) {
+        if (!DG || typeof DG.rasterLayer !== 'function') {
+            log('DG.rasterLayer ?????????? ? ?????????? ??????????? ?????????? ????.');
+            return;
+        }
         var rasterTemplate = 'https://tile{s}.maps.2gis.com/tiles?layer=map&v=7.0.0&x={x}&y={y}&z={z}&key=' + key;
         var rasterLayer = DG.rasterLayer(rasterTemplate, {
             maxZoom: 18,
@@ -1603,7 +1755,14 @@ function persistFriendTransport(friend, state, previousMode) {
         rasterLayer.addTo(map);
     }
 
-    function updateTransportUi() {
+    async function updateTransportUi() {
+        if (!friendsLoaded) {
+            try {
+                await loadFriends();
+            } catch (error) {
+                log('Не удалось загрузить список друзей перед обновлением интерфейса транспорта: ' + (error && error.message ? error.message : String(error)));
+            }
+        }
         var transport = transportSelect ? transportSelect.value : 'driving';
         var allowed = FILTER_MATRIX[transport] || [];
 
@@ -2270,7 +2429,7 @@ function persistFriendTransport(friend, state, previousMode) {
             if (friendsPanelWasVisible && friendsPanel && friendsToggle) {
                 friendsPanel.classList.remove('hidden');
                 friendsToggle.classList.add('active');
-                loadFriends();
+                loadFriends().catch(function () {});
             }
         }
 
@@ -2751,9 +2910,13 @@ function persistFriendTransport(friend, state, previousMode) {
     updatePickupOptions();
     updatePickupControlsVisibility();
 
+    loadFriends().catch(function (error) {
+        log('Не удалось загрузить список друзей: ' + (error && error.message ? error.message : String(error)));
+        scheduleMeetpointRecalculation();
+    });
+
     waitForDG();
     updateTransportUi();
-    scheduleMeetpointRecalculation();
 }());
 
 

@@ -4,14 +4,14 @@
     "name": "Андрей",
     "x_coord": 55.668757,
     "y_coord": 37.802357,
-    "mode": "public_transport"
+    "mode": "walking"
   },
   {
     "friend_id": 2,
     "name": "Илья С",
     "x_coord": 55.644621,
     "y_coord": 37.527237,
-    "mode": "public_transport"
+    "mode": "car"
   },
   {
     "friend_id": 3,
