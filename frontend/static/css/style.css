@@ -1,0 +1,504 @@
+﻿html, body {
+    height: 100%;
+    margin: 0;
+}
+
+/* Basic layout for the demo UI. */
+body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    color: #1f1f1f;
+    background: #f5f5f5;
+    min-height: 100vh;
+}
+
+.layout {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+}
+
+.panel {
+    width: 390px;
+    padding: 16px;
+    background: #ffffff;
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+}
+
+.panel-title {
+    font-size: 1rem;
+    margin-bottom: 6px;
+}
+
+.search-block,
+.script-block {
+    display: block;
+}
+
+.search-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.search-controls input {
+    flex: 1;
+    padding: 6px 8px;
+}
+
+.transport-controls,
+.options-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.transport-controls select,
+.options-block select,
+.options-block input[type="number"] {
+    width: 100%;
+    padding: 6px 8px;
+}
+
+.filters-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid #e0e0e0;
+    padding: 8px;
+    border-radius: 6px;
+    background: #fafafa;
+}
+
+.filters-controls > span {
+    font-weight: 600;
+}
+
+.filters-controls label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+}
+
+.flex-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.toggle-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.toggle-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pt-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid #dfe4ff;
+    background: #f4f7ff;
+    padding: 8px;
+    border-radius: 6px;
+}
+
+.pt-options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+}
+
+.search-results {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+    max-height: 140px;
+    overflow-y: auto;
+    border: 1px solid #d0d0d0;
+}
+
+.search-results li {
+    padding: 6px 8px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+}
+
+.search-results li:last-child {
+    border-bottom: none;
+}
+
+.search-results li.active {
+    background: #e3f2fd;
+}
+
+.nav-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.hint {
+    font-size: 0.85rem;
+    color: #666;
+    margin: 0;
+}
+
+.point-info {
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 10px;
+    background: #fafafa;
+}
+
+.point-info h3 {
+    margin: 0 0 6px 0;
+    font-size: 0.95rem;
+}
+
+.point-address {
+    color: #555;
+    margin: 0;
+}
+
+.point-coords {
+    font-family: 'Fira Code', monospace;
+    font-size: 0.85rem;
+    margin: 6px 0;
+}
+
+.point-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.route-info {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 8px;
+    background: #fdfdfd;
+}
+
+.route-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+.route-summary span {
+    background: #eef5ff;
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+
+.route-steps {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.route-steps th,
+.route-steps td {
+    border: 1px solid #d0d0d0;
+    padding: 4px 6px;
+    text-align: left;
+}
+
+.route-steps tbody tr:nth-child(odd) {
+    background: #fafafa;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.muted {
+    color: #888;
+}
+
+.panel textarea {
+    width: 100%;
+    resize: vertical;
+    font-family: 'Fira Code', monospace;
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#status-log {
+    min-height: 120px;
+    background: #111;
+    color: #0f0;
+    padding: 8px;
+    overflow: auto;
+}
+
+.map-container {
+    flex: 1;
+    position: relative;
+    background: #d0d0d0;
+    height: 100vh;
+}
+
+.map,
+#map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.sr-only {
+    position: absolute;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    height: 1px;
+    width: 1px;
+    white-space: nowrap;
+}
+
+.dg-control__item:where([title="Гид"], [title="Жильё"]) {
+    display: none !important;
+}
+
+.map-popup {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 160px;
+}
+.map-popup__title {
+    font-weight: 600;
+}
+.map-popup__coords {
+    font-family: "Fira Code", monospace;
+    font-size: 0.85rem;
+}
+.map-popup__actions {
+    display: flex;
+    gap: 6px;
+}
+.map-popup__actions button {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+}
+
+.friends-panel {
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 10px;
+    background: #fafafa;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+.friends-panel h3 {
+    margin: 0 0 8px 0;
+    font-size: 0.95rem;
+}
+#friends-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.friends-panel__item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background: #fff;
+}
+.friends-panel__item-name {
+    font-weight: 600;
+}
+.friends-panel__item button {
+    padding: 4px 8px;
+    font-size: 0.85rem;
+
+    flex-shrink: 0;
+}
+.pickup-controls {
+    margin: 10px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pickup-controls label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.95rem;
+}
+
+.pickup-controls__select {
+    padding: 4px 6px;
+    font-size: 0.95rem;
+}
+
+.friends-panel__transport-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #d0d0d0;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background 0.2s ease;
+}
+
+.friends-panel__transport-btn:hover {
+    background: #eef3ff;
+}
+
+.friends-panel__transport-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(47, 128, 237, 0.25);
+}
+
+.schedule-controls {
+    margin: 10px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.schedule-controls__inputs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.schedule-controls__inputs input[type='datetime-local'] {
+    padding: 4px 6px;
+    font-size: 0.95rem;
+}
+
+.schedule-results {
+    margin: 12px 0;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 10px;
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.schedule-entry {
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 6px;
+}
+
+.schedule-entry:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.schedule-entry__title {
+    font-weight: 600;
+}
+
+.schedule-entry__time {
+    color: #2f80ed;
+    font-weight: 600;
+}
+
+.schedule-message {
+    color: #666;
+}
+
+.friends-panel__item-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+.friends-panel__checkbox {
+    accent-color: #2f80ed;
+}
+
+.friends-panel__color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #5c6bc0;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.friends-panel__item--inactive {
+    opacity: 0.55;
+}
+
+.friends-panel__item--placeholder {
+    justify-content: center;
+    font-style: italic;
+    color: #666;
+}
+
+
+.friends-panel__item-meta {
+    font-size: 0.8rem;
+    color: #555;
+}
+
+.friends-panel__item--active {
+    border-color: #2f80ed;
+    box-shadow: 0 0 0 1px rgba(47, 128, 237, 0.35);
+    background: #f0f6ff;
+}
+
+.route-summary__section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+.route-summary__title {
+    font-weight: 600;
+}
+.route-summary__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 4px;
+}
+.route-steps__separator td {
+    height: 8px;
+    background: transparent;
+    border: none;
+}
+#traffic-row,
+#point-info,
+#route-info,
+.route-graph {
+    display: none !important;
+}
